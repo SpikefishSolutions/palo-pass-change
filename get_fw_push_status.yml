@@ -18,11 +18,13 @@
         detail_bulk_cmd: "show template-stack"
         push_scope_keyword: "template-stack"
         md5_field: "template-md5sum"
+        status_field: "template-status"
         result_container_key: "template-stack"
       device_group:
         detail_bulk_cmd: "show devicegroups"
         push_scope_keyword: "device-group"
         md5_field: "shared-policy-md5sum"
+        status_field: "shared-policy-status"
         result_container_key: "devicegroups"
 
   collections:
@@ -83,13 +85,17 @@
           {%-   set devices_raw = ((scope.devices.entry) if (scope.devices is defined and scope.devices.entry is defined) else []) -%}
           {%-   set devices = ([devices_raw] if (devices_raw is mapping) else (devices_raw | default([]))) -%}
           {%-   for dev in devices -%}
+          {%-     set sync_status = (dev.get(scope_cfg[push_scope_type].status_field, '') | string | lower | trim) -%}
           {%-     set _ = records.append(
                     {
                       'scope': scope_name,
                       'serial': (dev.get('serial', '') | string | trim),
                       'hostname': (dev.get('hostname', '') | string | trim),
                       'connected': (dev.get('connected', '') | string | lower | trim),
-                      'md5': (dev.get(scope_cfg[push_scope_type].md5_field, '') | string | trim)
+                      'md5': (dev.get(scope_cfg[push_scope_type].md5_field, '') | string | trim),
+                      'sync_status': sync_status,
+                      'has_out_of_sync': (sync_status == 'out of sync'),
+                      'has_in_sync': (sync_status == 'in sync')
                     }
                   ) -%}
           {%-   endfor -%}
@@ -161,7 +167,7 @@
           {{
             (
               scopes_in_sync
-              + ([item] if ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length <= 1)) else [])
+              + ([item] if ((scope_connected_devices | length > 0) and (scope_connected_out_of_sync_records | length == 0) and (scope_connected_in_sync_records | length > 0)) else [])
             )
             | unique
             | list
@@ -170,7 +176,7 @@
           {{
             (
               scopes_out_of_sync
-              + ([item] if ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length > 1)) else [])
+              + ([item] if ((scope_connected_devices | length > 0) and (scope_connected_out_of_sync_records | length > 0)) else [])
             )
             | unique
             | list
@@ -186,9 +192,11 @@
                     'connected_devices_in_scope': scope_connected_devices,
                     'connected_device_hostnames_in_scope': scope_connected_hostnames,
                     'md5_values_found': scope_md5_values | unique,
+                    'connected_in_sync_count': (scope_connected_in_sync_records | length),
+                    'connected_out_of_sync_count': (scope_connected_out_of_sync_records | length),
                     'is_connected': (scope_connected_devices | length > 0),
-                    'is_in_sync': ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length <= 1)),
-                    'is_out_of_sync': ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length > 1))
+                    'is_in_sync': ((scope_connected_devices | length > 0) and (scope_connected_out_of_sync_records | length == 0) and (scope_connected_in_sync_records | length > 0)),
+                    'is_out_of_sync': ((scope_connected_devices | length > 0) and (scope_connected_out_of_sync_records | length > 0))
                   }
                 },
                 recursive=True
@@ -215,6 +223,8 @@
             | list
           }}
         scope_connected_records: "{{ scope_records | selectattr('connected', 'in', ['yes', 'true', '1']) | list }}"
+        scope_connected_in_sync_records: "{{ scope_connected_records | selectattr('has_in_sync', 'equalto', true) | list }}"
+        scope_connected_out_of_sync_records: "{{ scope_connected_records | selectattr('has_out_of_sync', 'equalto', true) | list }}"
         scope_connected_devices: >-
           {{
             scope_connected_records
