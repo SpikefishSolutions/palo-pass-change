@@ -280,6 +280,9 @@
             | reject('equalto', '')
             | list
           }}
+
+    - name: Build push-scope bracket argument
+      ansible.builtin.set_fact:
         out_of_sync_scope_arg: "[{{ out_of_sync_scope_items_sanitized | join(' ') }}]"
 
     - name: Debug push-scope command strings
