@@ -1,0 +1,293 @@
+---
+- name: Get Firewall Push Status
+  hosts: "{{ workflow_target_host }}"
+  connection: local
+  gather_facts: false
+
+  vars:
+    device:
+      ip_address: "{{ ip_address }}"
+      username: "{{ panorama_username }}"
+      password: "{{ panorama_password }}"
+
+    # Expected values: template_stack, device_group
+    push_scope_type: "{{ push_scope_type | default('template_stack') }}"
+
+    scope_cfg:
+      template_stack:
+        list_cmd: "show template-stack all"
+        detail_cmd_prefix: "show template-stack name"
+        push_scope_keyword: "template-stack"
+        md5_regex_xml: "<template-md5sum>([^<]+)</template-md5sum>"
+        md5_regex_text: "template md5sum\\s*[:=]\\s*([A-Fa-f0-9]+)"
+      device_group:
+        list_cmd: "show devicegroups all"
+        detail_cmd_prefix: "show devicegroups name"
+        push_scope_keyword: "device-group"
+        md5_regex_xml: "<shared-policy-md5sum>([^<]+)</shared-policy-md5sum>"
+        md5_regex_text: "shared policy md5sum\\s*[:=]\\s*([A-Fa-f0-9]+)"
+
+  collections:
+    - paloaltonetworks.panos
+
+  tasks:
+    - name: Validate push scope type
+      ansible.builtin.assert:
+        that:
+          - push_scope_type in ['template_stack', 'device_group']
+        fail_msg: "Invalid push_scope_type='{{ push_scope_type }}'. Use template_stack or device_group."
+
+    - name: Get all scopes from Panorama
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ device }}"
+        cmd: "{{ scope_cfg[push_scope_type].list_cmd }}"
+      register: scope_list_raw
+
+    - name: Get all devices from Panorama
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ device }}"
+        cmd: "show devices all"
+      register: device_list_raw
+
+    - name: Build base parsed raw strings
+      ansible.builtin.set_fact:
+        scope_raw_combined: "{{ (scope_list_raw.stdout_xml | default('')) ~ '\n' ~ (scope_list_raw.stdout | default('')) }}"
+        devices_raw_combined: "{{ (device_list_raw.stdout_xml | default('')) ~ '\n' ~ (device_list_raw.stdout | default('')) }}"
+
+    - name: Parse all device serials
+      ansible.builtin.set_fact:
+        all_device_serials: >-
+          {{
+            (
+              devices_raw_combined | regex_findall('(?is)<serial>([^<]+)</serial>')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+
+    - name: Parse connected and disconnected devices
+      ansible.builtin.set_fact:
+        connected_device_serials: >-
+          {{
+            (
+              devices_raw_combined
+              | regex_findall('(?is)<entry[^>]*>\\s*<serial>([^<]+)</serial>[\\s\\S]*?<connected>(?:yes|true|1)</connected>[\\s\\S]*?</entry>')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+        disconnected_device_serials: >-
+          {{
+            (
+              devices_raw_combined
+              | regex_findall('(?is)<entry[^>]*>\\s*<serial>([^<]+)</serial>[\\s\\S]*?<connected>(?:no|false|0)</connected>[\\s\\S]*?</entry>')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+
+    - name: Parse candidate scope names
+      ansible.builtin.set_fact:
+        candidate_scope_names: >-
+          {{
+            (
+              scope_raw_combined | regex_findall('(?is)<entry name="([^"]+)">')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | difference(all_device_serials | default([]))
+            | unique
+            | sort
+            | list
+          }}
+
+    - name: Debug base parsing
+      ansible.builtin.debug:
+        msg:
+          push_scope_type: "{{ push_scope_type }}"
+          scope_count: "{{ candidate_scope_names | length }}"
+          scope_names: "{{ candidate_scope_names }}"
+          all_device_count: "{{ all_device_serials | length }}"
+          connected_device_count: "{{ connected_device_serials | length }}"
+          disconnected_device_count: "{{ disconnected_device_serials | length }}"
+
+    - name: Get detailed scope status (sync info + member devices)
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ device }}"
+        cmd: "{{ scope_cfg[push_scope_type].detail_cmd_prefix }} {{ item }}"
+      loop: "{{ candidate_scope_names }}"
+      loop_control:
+        label: "{{ item }}"
+      register: scope_detail_raw
+      failed_when: false
+
+    - name: Initialize scope classification variables
+      ansible.builtin.set_fact:
+        scopes_with_connected_devices: []
+        scopes_with_no_connected_devices: []
+        scopes_in_sync: []
+        scopes_out_of_sync: []
+        scope_sync_details: {}
+
+    - name: Classify scope connectivity and sync state
+      ansible.builtin.set_fact:
+        scopes_with_connected_devices: >-
+          {{
+            (
+              scopes_with_connected_devices
+              + ([item.item] if (scope_connected_devices | length > 0) else [])
+            )
+            | unique
+            | list
+          }}
+        scopes_with_no_connected_devices: >-
+          {{
+            (
+              scopes_with_no_connected_devices
+              + ([item.item] if (scope_connected_devices | length == 0) else [])
+            )
+            | unique
+            | list
+          }}
+        scopes_in_sync: >-
+          {{
+            (
+              scopes_in_sync
+              + ([item.item] if ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length <= 1)) else [])
+            )
+            | unique
+            | list
+          }}
+        scopes_out_of_sync: >-
+          {{
+            (
+              scopes_out_of_sync
+              + ([item.item] if ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length > 1)) else [])
+            )
+            | unique
+            | list
+          }}
+        scope_sync_details: >-
+          {{
+            scope_sync_details
+            | combine(
+                {
+                  item.item: {
+                    'devices_in_scope': scope_devices_in_scope,
+                    'connected_devices_in_scope': scope_connected_devices,
+                    'md5_values_found': scope_md5_values | unique,
+                    'is_connected': (scope_connected_devices | length > 0),
+                    'is_in_sync': ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length <= 1)),
+                    'is_out_of_sync': ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length > 1))
+                  }
+                },
+                recursive=True
+              )
+          }}
+      vars:
+        scope_detail_combined: "{{ (item.stdout_xml | default('')) ~ '\n' ~ (item.stdout | default('')) }}"
+        scope_devices_in_scope: >-
+          {{
+            all_device_serials
+            | select('in', scope_detail_combined)
+            | list
+          }}
+        scope_connected_devices: "{{ scope_devices_in_scope | intersect(connected_device_serials | default([])) }}"
+        scope_md5_values: >-
+          {{
+            (
+              (scope_detail_combined | regex_findall(scope_cfg[push_scope_type].md5_regex_xml))
+              + (scope_detail_combined | regex_findall(scope_cfg[push_scope_type].md5_regex_text))
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+      loop: "{{ scope_detail_raw.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Debug scope connectivity and sync buckets
+      ansible.builtin.debug:
+        msg:
+          scopes_with_connected_devices: "{{ scopes_with_connected_devices }}"
+          scopes_with_no_connected_devices: "{{ scopes_with_no_connected_devices }}"
+          scopes_in_sync: "{{ scopes_in_sync }}"
+          scopes_out_of_sync: "{{ scopes_out_of_sync }}"
+          scope_sync_details: "{{ scope_sync_details }}"
+
+    - name: Run show config push-scope for out-of-sync scopes
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ device }}"
+        cmd: >-
+          show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ item }}
+      loop: "{{ scopes_out_of_sync }}"
+      loop_control:
+        label: "{{ item }}"
+      register: push_scope_raw
+      failed_when: false
+
+    - name: Initialize push scope change tracking
+      ansible.builtin.set_fact:
+        push_scope_changes_by_scope: {}
+
+    - name: Track xpaths and owners for out-of-sync scopes
+      ansible.builtin.set_fact:
+        push_scope_changes_by_scope: >-
+          {{
+            push_scope_changes_by_scope
+            | combine(
+                {
+                  item.item: {
+                    'xpaths': parsed_xpaths,
+                    'owners': parsed_owners,
+                    'raw_output': push_scope_combined
+                  }
+                },
+                recursive=True
+              )
+          }}
+      vars:
+        push_scope_combined: "{{ (item.stdout_xml | default('')) ~ '\n' ~ (item.stdout | default('')) }}"
+        parsed_xpaths: >-
+          {{
+            (
+              push_scope_combined
+              | regex_findall('(?im)(/[A-Za-z0-9_\-\[\]@="\'/:.]+)')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+        parsed_owners: >-
+          {{
+            (
+              push_scope_combined
+              | regex_findall('(?im)(?:by|user|admin|owner)\\s*[:=]?\\s*([A-Za-z0-9_.-]+)')
+            )
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+      loop: "{{ push_scope_raw.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Final debug summary
+      ansible.builtin.debug:
+        msg:
+          push_scope_type: "{{ push_scope_type }}"
+          connected_scope_count: "{{ scopes_with_connected_devices | length }}"
+          disconnected_scope_count: "{{ scopes_with_no_connected_devices | length }}"
+          in_sync_scope_count: "{{ scopes_in_sync | length }}"
+          out_of_sync_scope_count: "{{ scopes_out_of_sync | length }}"
+          push_scope_changes_by_scope: "{{ push_scope_changes_by_scope }}"
