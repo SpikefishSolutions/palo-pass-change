@@ -285,18 +285,37 @@
       ansible.builtin.set_fact:
         out_of_sync_scope_arg: "[{{ out_of_sync_scope_items_sanitized | join(' ') }}]"
 
+    - name: Build push-scope XML members argument
+      ansible.builtin.set_fact:
+        out_of_sync_scope_members_xml: >-
+          {{
+            out_of_sync_scope_items_sanitized
+            | map('regex_replace', '^(.*)$', '<member>\\1</member>')
+            | join('')
+          }}
+
+    - name: Build push-scope XML command strings
+      ansible.builtin.set_fact:
+        push_scope_cmd_xml_current: >-
+          <show><config><push-scope><{{ scope_cfg[push_scope_type].push_scope_keyword }}>{{ out_of_sync_scope_members_xml }}</{{ scope_cfg[push_scope_type].push_scope_keyword }}></push-scope></config></show>
+        push_scope_cmd_xml_pushed_changes_yes: >-
+          <show><config><push-scope><{{ scope_cfg[push_scope_type].push_scope_keyword }}>{{ out_of_sync_scope_members_xml }}</{{ scope_cfg[push_scope_type].push_scope_keyword }}><pushed-changes>yes</pushed-changes></push-scope></config></show>
+
     - name: Debug push-scope command strings
       ansible.builtin.debug:
         msg:
           out_of_sync_scope_items_sanitized: "{{ out_of_sync_scope_items_sanitized }}"
           push_scope_cmd_current: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }}"
           push_scope_cmd_pushed_changes_yes: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }} pushed-changes yes"
+          push_scope_cmd_xml_current: "{{ push_scope_cmd_xml_current }}"
+          push_scope_cmd_xml_pushed_changes_yes: "{{ push_scope_cmd_xml_pushed_changes_yes }}"
       when: scopes_out_of_sync | length > 0
 
     - name: Run show config push-scope for out-of-sync scopes (current)
       paloaltonetworks.panos.panos_op:
         provider: "{{ device }}"
-        cmd: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }}"
+        cmd: "{{ push_scope_cmd_xml_current }}"
+        cmd_is_xml: true
       register: push_scope_raw
       failed_when: false
       when: scopes_out_of_sync | length > 0
@@ -304,7 +323,8 @@
     - name: Run show config push-scope for out-of-sync scopes (pushed-changes yes)
       paloaltonetworks.panos.panos_op:
         provider: "{{ device }}"
-        cmd: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }} pushed-changes yes"
+        cmd: "{{ push_scope_cmd_xml_pushed_changes_yes }}"
+        cmd_is_xml: true
       register: push_scope_pushed_raw
       failed_when: false
       when: scopes_out_of_sync | length > 0
