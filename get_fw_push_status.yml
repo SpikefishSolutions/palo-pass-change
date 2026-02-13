@@ -426,7 +426,6 @@
           in_sync_scope_count: "{{ scopes_in_sync | length }}"
           out_of_sync_scope_count: "{{ scopes_out_of_sync | length }}"
           out_of_sync_scope_arg: "{{ out_of_sync_scope_arg | default('[]') }}"
-          push_scope_changes_summary: "{{ push_scope_changes_summary }}"
           push_scope_changes_by_scope: "{{ push_scope_changes_by_scope }}"
 
     - name: Publish important outputs as stats
