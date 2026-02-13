@@ -383,8 +383,11 @@
           all_unique_owners: "{{ combined_entries_slim | map(attribute='admin') | reject('equalto', '') | unique | list }}"
           all_unique_objtypes: "{{ combined_entries_slim | map(attribute='objtype') | reject('equalto', '') | unique | list }}"
           owner_counts: "{{ owner_counts }}"
+          account_counts: "{{ owner_counts }}"
           loc_counts: "{{ loc_counts }}"
           objtype_counts: "{{ objtype_counts }}"
+          per_location_owner_counts: "{{ per_location_owner_counts }}"
+          per_location_objtype_counts: "{{ per_location_objtype_counts }}"
         push_scope_changes_by_scope: >-
           {%- set grouped = {} -%}
           {%- for scope_name in scopes_out_of_sync -%}
@@ -434,6 +437,32 @@
           {%-   endif -%}
           {%- endfor -%}
           {{ counts }}
+        per_location_owner_counts: >-
+          {%- set grouped = {} -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set loc = e.loc | default('') -%}
+          {%-   set owner = e.admin | default('') -%}
+          {%-   if loc != '' and owner != '' -%}
+          {%-     if loc not in grouped -%}
+          {%-       set _ = grouped.update({loc: {}}) -%}
+          {%-     endif -%}
+          {%-     set _ = grouped[loc].update({owner: ((grouped[loc].get(owner, 0) | int) + 1)}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ grouped }}
+        per_location_objtype_counts: >-
+          {%- set grouped = {} -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set loc = e.loc | default('') -%}
+          {%-   set objtype = e.objtype | default('') -%}
+          {%-   if loc != '' and objtype != '' -%}
+          {%-     if loc not in grouped -%}
+          {%-       set _ = grouped.update({loc: {}}) -%}
+          {%-     endif -%}
+          {%-     set _ = grouped[loc].update({objtype: ((grouped[loc].get(objtype, 0) | int) + 1)}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ grouped }}
       when: scopes_out_of_sync | length > 0
 
     - name: Ensure empty change tracking when no out-of-sync scopes
@@ -448,6 +477,8 @@
           account_counts: {}
           loc_counts: {}
           objtype_counts: {}
+          per_location_owner_counts: {}
+          per_location_objtype_counts: {}
         push_scope_changes_by_scope: {}
       when: scopes_out_of_sync | length == 0
 
