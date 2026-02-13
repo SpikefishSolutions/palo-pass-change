@@ -53,7 +53,7 @@
       ansible.builtin.set_fact:
         scope_entries: "{{ [scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([])) }}"
       vars:
-        scope_entries_raw: "{{ scope_stdout_json.response.result.entry | default([]) }}"
+        scope_entries_raw: "{{ scope_stdout_json.response.result.template-stack.entry | default([]) }}"
 
     - name: Parse candidate scope names from JSON
       ansible.builtin.set_fact:
