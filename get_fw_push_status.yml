@@ -269,11 +269,14 @@
         out_of_sync_scope_items_sanitized: >-
           {{
             scopes_out_of_sync
-            | map('regex_replace', '[\\r\\n\\t]+', ' ')
-            | map('regex_replace', '^\\s+|\\s+$', '')
-            | map('regex_replace', '\"', '')
-            | map('regex_replace', \"'\", '')
-            | map('regex_replace', '\\[|\\]', '')
+            | map('replace', '\n', ' ')
+            | map('replace', '\r', ' ')
+            | map('replace', '\t', ' ')
+            | map('trim')
+            | map('replace', '"', '')
+            | map('replace', '[', '')
+            | map('replace', ']', '')
+            | map('trim')
             | reject('equalto', '')
             | list
           }}
