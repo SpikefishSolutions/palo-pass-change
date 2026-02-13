@@ -382,6 +382,9 @@
           all_unique_locs: "{{ combined_entries_slim | map(attribute='loc') | reject('equalto', '') | unique | list }}"
           all_unique_owners: "{{ combined_entries_slim | map(attribute='admin') | reject('equalto', '') | unique | list }}"
           all_unique_objtypes: "{{ combined_entries_slim | map(attribute='objtype') | reject('equalto', '') | unique | list }}"
+          owner_counts: "{{ owner_counts }}"
+          loc_counts: "{{ loc_counts }}"
+          objtype_counts: "{{ objtype_counts }}"
         push_scope_changes_by_scope: >-
           {%- set grouped = {} -%}
           {%- for scope_name in scopes_out_of_sync -%}
@@ -404,6 +407,33 @@
           {%-   set _ = entries.append({'xpath': (e.get('xpath', '') | string | trim), 'loc': (e.get('@loc', '') | string | trim), 'admin': (e.get('@admin', '') | string | trim), 'objtype': (e.get('@objtype', '') | string | trim)}) -%}
           {%- endfor -%}
           {{ entries }}
+        owner_counts: >-
+          {%- set counts = {} -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set key = e.admin | default('') -%}
+          {%-   if key != '' -%}
+          {%-     set _ = counts.update({key: ((counts.get(key, 0) | int) + 1)}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ counts }}
+        loc_counts: >-
+          {%- set counts = {} -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set key = e.loc | default('') -%}
+          {%-   if key != '' -%}
+          {%-     set _ = counts.update({key: ((counts.get(key, 0) | int) + 1)}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ counts }}
+        objtype_counts: >-
+          {%- set counts = {} -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set key = e.objtype | default('') -%}
+          {%-   if key != '' -%}
+          {%-     set _ = counts.update({key: ((counts.get(key, 0) | int) + 1)}) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ counts }}
       when: scopes_out_of_sync | length > 0
 
     - name: Ensure empty change tracking when no out-of-sync scopes
@@ -414,12 +444,17 @@
           all_unique_locs: []
           all_unique_owners: []
           all_unique_objtypes: []
+          owner_counts: {}
+          account_counts: {}
+          loc_counts: {}
+          objtype_counts: {}
         push_scope_changes_by_scope: {}
       when: scopes_out_of_sync | length == 0
 
     - name: Final debug summary
       ansible.builtin.debug:
         msg:
+          push_scope_changes_summary: "{{ push_scope_changes_summary }}"
           push_scope_type: "{{ push_scope_type }}"
           connected_scope_count: "{{ scopes_with_connected_devices | length }}"
           disconnected_scope_count: "{{ scopes_with_no_connected_devices | length }}"
