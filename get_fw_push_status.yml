@@ -266,7 +266,26 @@
 
     - name: Build push-scope list argument
       ansible.builtin.set_fact:
-        out_of_sync_scope_arg: "[{{ scopes_out_of_sync | join(' ') }}]"
+        out_of_sync_scope_items_sanitized: >-
+          {{
+            scopes_out_of_sync
+            | map('regex_replace', '[\\r\\n\\t]+', ' ')
+            | map('regex_replace', '^\\s+|\\s+$', '')
+            | map('regex_replace', '\"', '')
+            | map('regex_replace', \"'\", '')
+            | map('regex_replace', '\\[|\\]', '')
+            | reject('equalto', '')
+            | list
+          }}
+        out_of_sync_scope_arg: "[{{ out_of_sync_scope_items_sanitized | join(' ') }}]"
+
+    - name: Debug push-scope command strings
+      ansible.builtin.debug:
+        msg:
+          out_of_sync_scope_items_sanitized: "{{ out_of_sync_scope_items_sanitized }}"
+          push_scope_cmd_current: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }}"
+          push_scope_cmd_pushed_changes_yes: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }} pushed-changes yes"
+      when: scopes_out_of_sync | length > 0
 
     - name: Run show config push-scope for out-of-sync scopes (current)
       paloaltonetworks.panos.panos_op:
