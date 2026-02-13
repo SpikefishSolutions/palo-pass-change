@@ -288,11 +288,11 @@
     - name: Build push-scope XML members argument
       ansible.builtin.set_fact:
         out_of_sync_scope_members_xml: >-
-          {{
-            out_of_sync_scope_items_sanitized
-            | map('regex_replace', '^(.*)$', '<member>\\1</member>')
-            | join('')
-          }}
+          {%- set members = [] -%}
+          {%- for scope_name in out_of_sync_scope_items_sanitized -%}
+          {%-   set _ = members.append('<member>' ~ scope_name ~ '</member>') -%}
+          {%- endfor -%}
+          {{ members | join('') }}
 
     - name: Build push-scope XML command strings
       ansible.builtin.set_fact:
