@@ -266,13 +266,12 @@
 
     - name: Build push-scope list argument
       ansible.builtin.set_fact:
-        out_of_sync_scope_arg: "[{{ scopes_out_of_sync | join(',') }}]"
+        out_of_sync_scope_arg: "[{{ scopes_out_of_sync | join(' ') }}]"
 
     - name: Run show config push-scope for out-of-sync scopes (current)
       paloaltonetworks.panos.panos_op:
         provider: "{{ device }}"
-        cmd: >-
-          show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }}
+        cmd: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }}"
       register: push_scope_raw
       failed_when: false
       when: scopes_out_of_sync | length > 0
@@ -280,8 +279,7 @@
     - name: Run show config push-scope for out-of-sync scopes (pushed-changes yes)
       paloaltonetworks.panos.panos_op:
         provider: "{{ device }}"
-        cmd: >-
-          show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }} pushed-changes yes
+        cmd: "show config push-scope {{ scope_cfg[push_scope_type].push_scope_keyword }} {{ out_of_sync_scope_arg }} pushed-changes yes"
       register: push_scope_pushed_raw
       failed_when: false
       when: scopes_out_of_sync | length > 0
