@@ -17,13 +17,11 @@
       template_stack:
         detail_bulk_cmd: "show template-stack"
         push_scope_keyword: "template-stack"
-        md5_regex_xml: "<template-md5sum>([^<]+)</template-md5sum>"
-        md5_regex_text: "template md5sum\\s*[:=]\\s*([A-Fa-f0-9]+)"
+        md5_field: "template-md5sum"
       device_group:
         detail_bulk_cmd: "show devicegroups"
         push_scope_keyword: "device-group"
-        md5_regex_xml: "<shared-policy-md5sum>([^<]+)</shared-policy-md5sum>"
-        md5_regex_text: "shared policy md5sum\\s*[:=]\\s*([A-Fa-f0-9]+)"
+        md5_field: "shared-policy-md5sum"
 
   collections:
     - paloaltonetworks.panos
@@ -35,12 +33,6 @@
           - push_scope_type in ['template_stack', 'device_group']
         fail_msg: "Invalid push_scope_type='{{ push_scope_type }}'. Use template_stack or device_group."
 
-    - name: Get all devices from Panorama
-      paloaltonetworks.panos.panos_op:
-        provider: "{{ device }}"
-        cmd: "show devices all"
-      register: device_list_raw
-
     - name: Get bulk scope status (sync info + member devices)
       paloaltonetworks.panos.panos_op:
         provider: "{{ device }}"
@@ -48,60 +40,58 @@
       register: scope_detail_bulk_raw
       failed_when: false
 
-    - name: Build base parsed raw strings
+    - name: Parse bulk JSON into scope entries and device records
       ansible.builtin.set_fact:
-        devices_raw_combined: "{{ (device_list_raw.stdout_xml | default('')) ~ '\n' ~ (device_list_raw.stdout | default('')) }}"
-        scope_detail_bulk_combined: "{{ (scope_detail_bulk_raw.stdout_xml | default('')) ~ '\n' ~ (scope_detail_bulk_raw.stdout | default('')) }}"
+        scope_entries: "{{ [scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([])) }}"
+        candidate_scope_names: >-
+          {%- set names = [] -%}
+          {%- for scope in ([scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([]))) -%}
+          {%-   set name = (scope.name | default(scope.get('@name', ''))) | string | trim -%}
+          {%-   if name != '' -%}
+          {%-     set _ = names.append(name) -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ names | unique | sort | list }}
+        all_scope_device_records: >-
+          {%- set records = [] -%}
+          {%- for scope in ([scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([]))) -%}
+          {%-   set scope_name = (scope.name | default(scope.get('@name', ''))) | string | trim -%}
+          {%-   set devices_raw = (scope.devices.entry if (scope.devices is defined and scope.devices.entry is defined) else []) -%}
+          {%-   set devices = ([devices_raw] if (devices_raw is mapping) else (devices_raw | default([]))) -%}
+          {%-   for dev in devices -%}
+          {%-     set _ = records.append(
+                    {
+                      'scope': scope_name,
+                      'serial': (dev.serial | default('') | string | trim),
+                      'hostname': (dev.hostname | default('') | string | trim),
+                      'connected': (dev.connected | default('') | string | lower | trim),
+                      'md5': (dev[scope_cfg[push_scope_type].md5_field] | default('') | string | trim)
+                    }
+                  ) -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ records }}
+      vars:
+        scope_entries_raw: "{{ scope_detail_bulk_raw.stdout.response.result.entry | default([]) }}"
 
-    - name: Parse all device serials
-      ansible.builtin.set_fact:
-        all_device_serials: >-
-          {{
-            (
-              devices_raw_combined | regex_findall('(?is)<serial>([^<]+)</serial>')
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-
-    - name: Parse connected and disconnected devices
+    - name: Parse connected and disconnected device lists from scope data
       ansible.builtin.set_fact:
         connected_device_serials: >-
           {{
-            (
-              devices_raw_combined
-              | regex_findall('(?is)<entry[^>]*>\\s*<serial>([^<]+)</serial>[\\s\\S]*?<connected>(?:yes|true|1)</connected>[\\s\\S]*?</entry>')
-            )
-            | map('trim')
+            all_scope_device_records
+            | selectattr('connected', 'in', ['yes', 'true', '1'])
+            | map(attribute='serial')
             | reject('equalto', '')
             | unique
+            | sort
             | list
           }}
         disconnected_device_serials: >-
           {{
-            (
-              devices_raw_combined
-              | regex_findall('(?is)<entry[^>]*>\\s*<serial>([^<]+)</serial>[\\s\\S]*?<connected>(?:no|false|0)</connected>[\\s\\S]*?</entry>')
-            )
-            | map('trim')
+            all_scope_device_records
+            | rejectattr('connected', 'in', ['yes', 'true', '1'])
+            | map(attribute='serial')
             | reject('equalto', '')
-            | unique
-            | list
-          }}
-
-    - name: Parse candidate scope names
-      ansible.builtin.set_fact:
-        candidate_scope_names: >-
-          {{
-            (
-              scope_detail_bulk_combined
-              | regex_findall('(?is)<entry name="([^"]+)">[\\s\\S]*?<devices>[\\s\\S]*?</devices>')
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | difference(all_device_serials | default([]))
             | unique
             | sort
             | list
@@ -113,7 +103,7 @@
           push_scope_type: "{{ push_scope_type }}"
           scope_count: "{{ candidate_scope_names | length }}"
           scope_names: "{{ candidate_scope_names }}"
-          all_device_count: "{{ all_device_serials | length }}"
+          all_scope_device_count: "{{ all_scope_device_records | length }}"
           connected_device_count: "{{ connected_device_serials | length }}"
           disconnected_device_count: "{{ disconnected_device_serials | length }}"
 
@@ -170,7 +160,9 @@
                 {
                   item: {
                     'devices_in_scope': scope_devices_in_scope,
+                    'device_hostnames_in_scope': scope_device_hostnames,
                     'connected_devices_in_scope': scope_connected_devices,
+                    'connected_device_hostnames_in_scope': scope_connected_hostnames,
                     'md5_values_found': scope_md5_values | unique,
                     'is_connected': (scope_connected_devices | length > 0),
                     'is_in_sync': ((scope_connected_devices | length > 0) and (scope_md5_values | unique | length <= 1)),
@@ -181,33 +173,48 @@
               )
           }}
       vars:
-        scope_devices_block: >-
-          {{
-            (
-              scope_detail_bulk_combined
-              | regex_findall('(?is)<entry name="' ~ (item | regex_escape) ~ '">[\\s\\S]*?<devices>([\\s\\S]*?)</devices>')
-              | first
-              | default('')
-            )
-          }}
+        scope_records: "{{ all_scope_device_records | selectattr('scope', 'equalto', item) | list }}"
         scope_devices_in_scope: >-
           {{
-            (
-              scope_devices_block
-              | regex_findall('(?is)<entry name="([^"]+)">')
-            )
-            | intersect(all_device_serials | default([]))
+            scope_records
+            | map(attribute='serial')
+            | reject('equalto', '')
             | unique
+            | sort
             | list
           }}
-        scope_connected_devices: "{{ scope_devices_in_scope | intersect(connected_device_serials | default([])) }}"
+        scope_device_hostnames: >-
+          {{
+            scope_records
+            | map(attribute='hostname')
+            | reject('equalto', '')
+            | unique
+            | sort
+            | list
+          }}
+        scope_connected_records: "{{ scope_records | selectattr('connected', 'in', ['yes', 'true', '1']) | list }}"
+        scope_connected_devices: >-
+          {{
+            scope_connected_records
+            | map(attribute='serial')
+            | reject('equalto', '')
+            | unique
+            | sort
+            | list
+          }}
+        scope_connected_hostnames: >-
+          {{
+            scope_connected_records
+            | map(attribute='hostname')
+            | reject('equalto', '')
+            | unique
+            | sort
+            | list
+          }}
         scope_md5_values: >-
           {{
-            (
-              (scope_devices_block | regex_findall(scope_cfg[push_scope_type].md5_regex_xml))
-              + (scope_devices_block | regex_findall(scope_cfg[push_scope_type].md5_regex_text))
-            )
-            | map('trim')
+            scope_records
+            | map(attribute='md5')
             | reject('equalto', '')
             | unique
             | list
