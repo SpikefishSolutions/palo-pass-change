@@ -334,101 +334,86 @@
         push_scope_changes_by_scope: {}
         push_scope_changes_summary: {}
 
-    - name: Track xpaths and owners for out-of-sync scopes
+    - name: Normalize push-scope responses to JSON
+      ansible.builtin.set_fact:
+        push_scope_current_json: >-
+          {{
+            (push_scope_raw.stdout | from_json)
+            if (push_scope_raw.stdout is string)
+            else (push_scope_raw.stdout | default({}))
+          }}
+        push_scope_pushed_json: >-
+          {{
+            (push_scope_pushed_raw.stdout | from_json)
+            if (push_scope_pushed_raw.stdout is string)
+            else (push_scope_pushed_raw.stdout | default({}))
+          }}
+      when: scopes_out_of_sync | length > 0
+
+    - name: Normalize push-scope object entry lists
+      ansible.builtin.set_fact:
+        push_scope_current_entries: >-
+          {{
+            [current_entries_raw]
+            if (current_entries_raw is mapping)
+            else (current_entries_raw | default([]))
+          }}
+        push_scope_pushed_entries: >-
+          {{
+            [pushed_entries_raw]
+            if (pushed_entries_raw is mapping)
+            else (pushed_entries_raw | default([]))
+          }}
+      vars:
+        current_entries_raw: "{{ push_scope_current_json.response.result.objects.entry | default([]) }}"
+        pushed_entries_raw: "{{ push_scope_pushed_json.response.result.objects.entry | default([]) }}"
+      when: scopes_out_of_sync | length > 0
+
+    - name: Combine push-scope object entries before parsing
+      ansible.builtin.set_fact:
+        push_scope_combined_entries: "{{ (push_scope_current_entries | default([])) + (push_scope_pushed_entries | default([])) }}"
+      when: scopes_out_of_sync | length > 0
+
+    - name: Track xpaths, locations, admins, and object types for out-of-sync scopes
       ansible.builtin.set_fact:
         push_scope_changes_summary:
-          current:
-            xpaths: "{{ parsed_current_xpaths }}"
-            owners: "{{ parsed_current_owners }}"
-            raw_output: "{{ push_scope_current_combined }}"
-          pushed_changes_yes:
-            xpaths: "{{ parsed_pushed_xpaths }}"
-            owners: "{{ parsed_pushed_owners }}"
-            raw_output: "{{ push_scope_pushed_combined }}"
-          all_unique_xpaths: "{{ (parsed_current_xpaths + parsed_pushed_xpaths) | unique | list }}"
-          all_unique_owners: "{{ (parsed_current_owners + parsed_pushed_owners) | unique | list }}"
-        push_scope_changes_by_scope:
-          all_scopes:
-            current:
-              xpaths: "{{ parsed_current_xpaths }}"
-              owners: "{{ parsed_current_owners }}"
-            pushed_changes_yes:
-              xpaths: "{{ parsed_pushed_xpaths }}"
-              owners: "{{ parsed_pushed_owners }}"
-            all_unique_xpaths: "{{ (parsed_current_xpaths + parsed_pushed_xpaths) | unique | list }}"
-            all_unique_owners: "{{ (parsed_current_owners + parsed_pushed_owners) | unique | list }}"
+          entries: "{{ combined_entries_slim }}"
+          all_unique_xpaths: "{{ combined_entries_slim | map(attribute='xpath') | reject('equalto', '') | unique | list }}"
+          all_unique_locs: "{{ combined_entries_slim | map(attribute='loc') | reject('equalto', '') | unique | list }}"
+          all_unique_owners: "{{ combined_entries_slim | map(attribute='admin') | reject('equalto', '') | unique | list }}"
+          all_unique_objtypes: "{{ combined_entries_slim | map(attribute='objtype') | reject('equalto', '') | unique | list }}"
+        push_scope_changes_by_scope: >-
+          {%- set grouped = {} -%}
+          {%- for scope_name in scopes_out_of_sync -%}
+          {%-   set _ = grouped.update({scope_name: {'entries': [], 'xpaths': [], 'owners': [], 'objtypes': []}}) -%}
+          {%- endfor -%}
+          {%- for e in combined_entries_slim -%}
+          {%-   set loc = e.loc | default('') -%}
+          {%-   if loc in grouped -%}
+          {%-     set _ = grouped[loc]['entries'].append(e) -%}
+          {%-     if e.xpath not in grouped[loc]['xpaths'] and e.xpath != '' -%}{%- set _ = grouped[loc]['xpaths'].append(e.xpath) -%}{%- endif -%}
+          {%-     if e.admin not in grouped[loc]['owners'] and e.admin != '' -%}{%- set _ = grouped[loc]['owners'].append(e.admin) -%}{%- endif -%}
+          {%-     if e.objtype not in grouped[loc]['objtypes'] and e.objtype != '' -%}{%- set _ = grouped[loc]['objtypes'].append(e.objtype) -%}{%- endif -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ grouped }}
       vars:
-        push_scope_current_combined: >-
-          {{
-            ((push_scope_raw.stdout_xml | default('')) ~ '\n' ~ (push_scope_raw.stdout | default('')))
-            if (push_scope_raw is defined)
-            else ''
-          }}
-        push_scope_pushed_combined: >-
-          {{
-            ((push_scope_pushed_raw.stdout_xml | default('')) ~ '\n' ~ (push_scope_pushed_raw.stdout | default('')))
-            if (push_scope_pushed_raw is defined)
-            else ''
-          }}
-        parsed_current_xpaths: >-
-          {{
-            (
-              push_scope_current_combined
-              | regex_findall("(?im)(/[^\\s<>\"]+)")
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-        parsed_current_owners: >-
-          {{
-            (
-              push_scope_current_combined
-              | regex_findall("(?im)(?:by|user|admin|owner)\\s*[:=]?\\s*([A-Za-z0-9_.-]+)")
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-        parsed_pushed_xpaths: >-
-          {{
-            (
-              push_scope_pushed_combined
-              | regex_findall("(?im)(/[^\\s<>\"]+)")
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
-        parsed_pushed_owners: >-
-          {{
-            (
-              push_scope_pushed_combined
-              | regex_findall("(?im)(?:by|user|admin|owner)\\s*[:=]?\\s*([A-Za-z0-9_.-]+)")
-            )
-            | map('trim')
-            | reject('equalto', '')
-            | unique
-            | list
-          }}
+        combined_entries_slim: >-
+          {%- set entries = [] -%}
+          {%- for e in push_scope_combined_entries -%}
+          {%-   set _ = entries.append({'xpath': (e.get('xpath', '') | string | trim), 'loc': (e.get('@loc', '') | string | trim), 'admin': (e.get('@admin', '') | string | trim), 'objtype': (e.get('@objtype', '') | string | trim)}) -%}
+          {%- endfor -%}
+          {{ entries }}
       when: scopes_out_of_sync | length > 0
 
     - name: Ensure empty change tracking when no out-of-sync scopes
       ansible.builtin.set_fact:
         push_scope_changes_summary:
-          current:
-            xpaths: []
-            owners: []
-            raw_output: ""
-          pushed_changes_yes:
-            xpaths: []
-            owners: []
-            raw_output: ""
+          entries: []
           all_unique_xpaths: []
+          all_unique_locs: []
           all_unique_owners: []
+          all_unique_objtypes: []
         push_scope_changes_by_scope: {}
       when: scopes_out_of_sync | length == 0
 
@@ -440,6 +425,22 @@
           disconnected_scope_count: "{{ scopes_with_no_connected_devices | length }}"
           in_sync_scope_count: "{{ scopes_in_sync | length }}"
           out_of_sync_scope_count: "{{ scopes_out_of_sync | length }}"
+          out_of_sync_scope_arg: "{{ out_of_sync_scope_arg | default('[]') }}"
+          push_scope_changes_summary: "{{ push_scope_changes_summary }}"
+          push_scope_changes_by_scope: "{{ push_scope_changes_by_scope }}"
+
+    - name: Publish important outputs as stats
+      ansible.builtin.set_stats:
+        data:
+          push_scope_type: "{{ push_scope_type }}"
+          candidate_scope_names: "{{ candidate_scope_names }}"
+          connected_device_serials: "{{ connected_device_serials }}"
+          disconnected_device_serials: "{{ disconnected_device_serials }}"
+          scopes_with_connected_devices: "{{ scopes_with_connected_devices }}"
+          scopes_with_no_connected_devices: "{{ scopes_with_no_connected_devices }}"
+          scopes_in_sync: "{{ scopes_in_sync }}"
+          scopes_out_of_sync: "{{ scopes_out_of_sync }}"
+          scope_sync_details: "{{ scope_sync_details }}"
           out_of_sync_scope_arg: "{{ out_of_sync_scope_arg | default('[]') }}"
           push_scope_changes_summary: "{{ push_scope_changes_summary }}"
           push_scope_changes_by_scope: "{{ push_scope_changes_by_scope }}"
