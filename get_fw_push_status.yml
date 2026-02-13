@@ -40,39 +40,54 @@
       register: scope_detail_bulk_raw
       failed_when: false
 
-    - name: Parse bulk JSON into scope entries and device records
+    - name: Normalize bulk scope stdout into JSON variable
+      ansible.builtin.set_fact:
+        scope_stdout_json: >-
+          {{
+            (scope_detail_bulk_raw.stdout | from_json)
+            if (scope_detail_bulk_raw.stdout is string)
+            else (scope_detail_bulk_raw.stdout | default({}))
+          }}
+
+    - name: Normalize scope entries list from JSON
       ansible.builtin.set_fact:
         scope_entries: "{{ [scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([])) }}"
+      vars:
+        scope_entries_raw: "{{ scope_stdout_json.response.result.entry | default([]) }}"
+
+    - name: Parse candidate scope names from JSON
+      ansible.builtin.set_fact:
         candidate_scope_names: >-
           {%- set names = [] -%}
-          {%- for scope in ([scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([]))) -%}
-          {%-   set name = (scope.name | default(scope.get('@name', ''))) | string | trim -%}
+          {%- for scope in scope_entries -%}
+          {%-   set name = (scope.get('name', scope.get('@name', '')) | string | trim) -%}
           {%-   if name != '' -%}
           {%-     set _ = names.append(name) -%}
           {%-   endif -%}
           {%- endfor -%}
           {{ names | unique | sort | list }}
+
+    - name: Build all scope device records from JSON
+      ansible.builtin.set_fact:
         all_scope_device_records: >-
           {%- set records = [] -%}
-          {%- for scope in ([scope_entries_raw] if (scope_entries_raw is mapping) else (scope_entries_raw | default([]))) -%}
-          {%-   set scope_name = (scope.name | default(scope.get('@name', ''))) | string | trim -%}
-          {%-   set devices_raw = (scope.devices.entry if (scope.devices is defined and scope.devices.entry is defined) else []) -%}
+          {%- for scope in scope_entries -%}
+          {%-   set scope_name = (scope.get('name', scope.get('@name', '')) | string | trim) -%}
+          {%-   set devices_raw = ((scope.devices.entry) if (scope.devices is defined and scope.devices.entry is defined) else []) -%}
           {%-   set devices = ([devices_raw] if (devices_raw is mapping) else (devices_raw | default([]))) -%}
           {%-   for dev in devices -%}
           {%-     set _ = records.append(
                     {
                       'scope': scope_name,
-                      'serial': (dev.serial | default('') | string | trim),
-                      'hostname': (dev.hostname | default('') | string | trim),
-                      'connected': (dev.connected | default('') | string | lower | trim),
-                      'md5': (dev[scope_cfg[push_scope_type].md5_field] | default('') | string | trim)
+                      'serial': (dev.get('serial', '') | string | trim),
+                      'hostname': (dev.get('hostname', '') | string | trim),
+                      'connected': (dev.get('connected', '') | string | lower | trim),
+                      'md5': (dev.get(scope_cfg[push_scope_type].md5_field, '') | string | trim)
                     }
                   ) -%}
           {%-   endfor -%}
           {%- endfor -%}
           {{ records }}
-      vars:
-        scope_entries_raw: "{{ scope_detail_bulk_raw.stdout.response.result.entry | default([]) }}"
 
     - name: Parse connected and disconnected device lists from scope data
       ansible.builtin.set_fact:
