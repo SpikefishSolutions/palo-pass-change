@@ -97,18 +97,12 @@
         src: "templates/fw_sync_daily_report.txt.j2"
         dest: "{{ report_text_path }}"
         mode: "0644"
-      vars:
-        report_date: "{{ report_date_resolved }}"
-        scopes_out_of_sync: "{{ scopes_out_of_sync_input }}"
 
     - name: Render HTML report
       ansible.builtin.template:
         src: "templates/fw_sync_daily_report.html.j2"
         dest: "{{ report_html_path }}"
         mode: "0644"
-      vars:
-        report_date: "{{ report_date_resolved }}"
-        scopes_out_of_sync: "{{ scopes_out_of_sync_input }}"
 
     - name: Read rendered HTML report as base64
       ansible.builtin.slurp:

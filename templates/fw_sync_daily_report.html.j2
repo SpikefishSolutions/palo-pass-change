@@ -7,7 +7,7 @@
 <body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.4;">
   <h2 style="margin-bottom: 4px;">Panorama Daily Sync Report</h2>
   <p style="margin-top: 0;">
-    <strong>Date:</strong> {{ report_date }}<br>
+    <strong>Date:</strong> {{ report_date_resolved }}<br>
     <strong>Scope Type:</strong> {{ report_scope_label }}
   </p>
 
@@ -27,7 +27,7 @@
     </tr>
     <tr>
       <td>Out-Of-Sync {{ report_scope_label }}</td>
-      <td>{{ scopes_out_of_sync | length }}</td>
+      <td>{{ scopes_out_of_sync_input | length }}</td>
     </tr>
   </table>
 

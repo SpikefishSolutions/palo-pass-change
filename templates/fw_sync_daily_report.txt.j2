@@ -1,11 +1,11 @@
 Panorama Daily Sync Report
-Date: {{ report_date }}
+Date: {{ report_date_resolved }}
 Scope Type: {{ report_scope_label }}
 
 Summary
 - Devices In Sync: {{ devices_in_sync_count }}
 - Devices Out Of Sync: {{ devices_out_of_sync_count }}
-- Out-Of-Sync {{ report_scope_label }}: {{ scopes_out_of_sync | length }}
+- Out-Of-Sync {{ report_scope_label }}: {{ scopes_out_of_sync_input | length }}
 
 Admins By Change Count
 {% if owner_counts | length == 0 -%}
