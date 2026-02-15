@@ -5,21 +5,22 @@
   gather_facts: false
 
   vars:
-    report_date: "{{ report_date | default(lookup('pipe', 'date +%Y-%m-%d')) }}"
+    report_date_input: "{{ report_date | default('') }}"
+    report_date_resolved: "{{ report_date_input if (report_date_input | string | length > 0) else lookup('pipe', 'date +%Y-%m-%d') }}"
     report_scope_label: "{{ 'Template Stacks' if (push_scope_type | default('template_stack')) == 'template_stack' else 'Device Groups' }}"
 
     # Defaults allow this playbook to run standalone; in workflow, pass stats from get_fw_push_status.yml
-    scope_sync_details: "{{ scope_sync_details | default({}) }}"
-    scopes_out_of_sync: "{{ scopes_out_of_sync | default([]) }}"
-    push_scope_changes_summary: "{{ push_scope_changes_summary | default({}) }}"
-    push_scope_changes_by_scope: "{{ push_scope_changes_by_scope | default({}) }}"
+    scope_sync_details_input: "{{ scope_sync_details | default({}) }}"
+    scopes_out_of_sync_input: "{{ scopes_out_of_sync | default([]) }}"
+    push_scope_changes_summary_input: "{{ push_scope_changes_summary | default({}) }}"
+    push_scope_changes_by_scope_input: "{{ push_scope_changes_by_scope | default({}) }}"
 
-    owner_counts: "{{ push_scope_changes_summary.owner_counts | default(push_scope_changes_summary.account_counts | default({})) }}"
-    objtype_counts: "{{ push_scope_changes_summary.objtype_counts | default({}) }}"
+    owner_counts: "{{ push_scope_changes_summary_input.owner_counts | default(push_scope_changes_summary_input.account_counts | default({})) }}"
+    objtype_counts: "{{ push_scope_changes_summary_input.objtype_counts | default({}) }}"
 
     devices_in_sync_count: >-
       {{
-        scope_sync_details
+        scope_sync_details_input
         | dict2items
         | map(attribute='value.connected_in_sync_count')
         | map('default', 0)
@@ -28,7 +29,7 @@
       }}
     devices_out_of_sync_count: >-
       {{
-        scope_sync_details
+        scope_sync_details_input
         | dict2items
         | map(attribute='value.connected_out_of_sync_count')
         | map('default', 0)
@@ -36,30 +37,33 @@
         | sum
       }}
 
-    report_output_dir: "{{ report_output_dir | default('./reports') }}"
-    report_filename_prefix: "{{ report_filename_prefix | default('fw_sync_daily_report') }}"
-    report_text_path: "{{ report_output_dir }}/{{ report_filename_prefix }}_{{ report_date }}.txt"
-    report_html_path: "{{ report_output_dir }}/{{ report_filename_prefix }}_{{ report_date }}.html"
-    report_subject: "{{ report_subject | default('Panorama Daily Sync Report - ' ~ report_date) }}"
-    report_emit_html_base64: "{{ report_emit_html_base64 | default(false) | bool }}"
-    report_emit_html_debug: "{{ report_emit_html_debug | default(false) | bool }}"
+    report_output_dir_input: "{{ report_output_dir | default('') }}"
+    report_output_dir_resolved: "{{ report_output_dir_input if (report_output_dir_input | string | length > 0) else './reports' }}"
+    report_filename_prefix_input: "{{ report_filename_prefix | default('') }}"
+    report_filename_prefix_resolved: "{{ report_filename_prefix_input if (report_filename_prefix_input | string | length > 0) else 'fw_sync_daily_report' }}"
+    report_text_path: "{{ report_output_dir_resolved }}/{{ report_filename_prefix_resolved }}_{{ report_date_resolved }}.txt"
+    report_html_path: "{{ report_output_dir_resolved }}/{{ report_filename_prefix_resolved }}_{{ report_date_resolved }}.html"
+    report_subject_input: "{{ report_subject | default('') }}"
+    report_subject_resolved: "{{ report_subject_input if (report_subject_input | string | length > 0) else ('Panorama Daily Sync Report - ' ~ report_date_resolved) }}"
+    report_emit_html_base64_flag: "{{ report_emit_html_base64 | default(false) | bool }}"
+    report_emit_html_debug_flag: "{{ report_emit_html_debug | default(true) | bool }}"
 
-    send_email: "{{ send_email | default(false) | bool }}"
-    smtp_host: "{{ smtp_host | default('') }}"
-    smtp_port: "{{ smtp_port | default(25) }}"
-    smtp_username: "{{ smtp_username | default(omit) }}"
-    smtp_password: "{{ smtp_password | default(omit) }}"
-    email_from: "{{ email_from | default(omit) }}"
-    email_to: "{{ email_to | default([]) }}"
-    email_cc: "{{ email_cc | default([]) }}"
+    send_email_enabled: "{{ send_email | default(false) | bool }}"
+    smtp_host_value: "{{ smtp_host | default('') }}"
+    smtp_port_value: "{{ smtp_port | default(25) }}"
+    smtp_username_value: "{{ smtp_username | default(omit) }}"
+    smtp_password_value: "{{ smtp_password | default(omit) }}"
+    email_from_value: "{{ email_from | default(omit) }}"
+    email_to_value: "{{ email_to | default([]) }}"
+    email_cc_value: "{{ email_cc | default([]) }}"
 
   tasks:
     - name: Build per-scope report rows
       ansible.builtin.set_fact:
         report_scope_rows: >-
           {%- set rows = [] -%}
-          {%- for scope_name in scopes_out_of_sync -%}
-          {%-   set scope_data = push_scope_changes_by_scope.get(scope_name, {}) -%}
+          {%- for scope_name in scopes_out_of_sync_input -%}
+          {%-   set scope_data = push_scope_changes_by_scope_input.get(scope_name, {}) -%}
           {%-   set entries = scope_data.get('entries', []) -%}
           {%-   set owner_counts_map = {} -%}
           {%-   set objtype_counts_map = {} -%}
@@ -84,7 +88,7 @@
 
     - name: Ensure report output directory exists
       ansible.builtin.file:
-        path: "{{ report_output_dir }}"
+        path: "{{ report_output_dir_resolved }}"
         state: directory
         mode: "0755"
 
@@ -93,48 +97,54 @@
         src: "templates/fw_sync_daily_report.txt.j2"
         dest: "{{ report_text_path }}"
         mode: "0644"
+      vars:
+        report_date: "{{ report_date_resolved }}"
+        scopes_out_of_sync: "{{ scopes_out_of_sync_input }}"
 
     - name: Render HTML report
       ansible.builtin.template:
         src: "templates/fw_sync_daily_report.html.j2"
         dest: "{{ report_html_path }}"
         mode: "0644"
+      vars:
+        report_date: "{{ report_date_resolved }}"
+        scopes_out_of_sync: "{{ scopes_out_of_sync_input }}"
 
     - name: Read rendered HTML report as base64
       ansible.builtin.slurp:
         src: "{{ report_html_path }}"
       register: report_html_slurp
-      when: report_emit_html_base64 or report_emit_html_debug
+      when: report_emit_html_base64_flag or report_emit_html_debug_flag
 
     - name: Debug rendered HTML report as base64
       ansible.builtin.debug:
         msg: "{{ report_html_slurp.content }}"
       when:
-        - report_emit_html_debug
+        - report_emit_html_debug_flag
         - report_html_slurp is defined
 
     - name: Send report email (HTML)
       ansible.builtin.mail:
-        host: "{{ smtp_host }}"
-        port: "{{ smtp_port }}"
-        username: "{{ smtp_username }}"
-        password: "{{ smtp_password }}"
-        from: "{{ email_from }}"
-        to: "{{ (email_to if (email_to is string) else (email_to | join(','))) }}"
-        cc: "{{ (email_cc if (email_cc is string) else (email_cc | join(','))) if (email_cc | length > 0) else omit }}"
-        subject: "{{ report_subject }}"
+        host: "{{ smtp_host_value }}"
+        port: "{{ smtp_port_value }}"
+        username: "{{ smtp_username_value }}"
+        password: "{{ smtp_password_value }}"
+        from: "{{ email_from_value }}"
+        to: "{{ (email_to_value if (email_to_value is string) else (email_to_value | join(','))) }}"
+        cc: "{{ (email_cc_value if (email_cc_value is string) else (email_cc_value | join(','))) if (email_cc_value | length > 0) else omit }}"
+        subject: "{{ report_subject_resolved }}"
         subtype: html
-        body: "{{ lookup('template', 'templates/fw_sync_daily_report.html.j2') }}"
+        body: "{{ lookup('file', report_html_path) }}"
       when:
-        - send_email
-        - smtp_host | length > 0
-        - (email_to is string and (email_to | length > 0)) or (email_to is sequence and (email_to | length > 0))
+        - send_email_enabled
+        - smtp_host_value | length > 0
+        - (email_to_value is string and (email_to_value | length > 0)) or (email_to_value is sequence and (email_to_value | length > 0))
 
     - name: Publish report outputs as stats
       ansible.builtin.set_stats:
         data:
-          report_date: "{{ report_date }}"
-          report_subject: "{{ report_subject }}"
+          report_date: "{{ report_date_resolved }}"
+          report_subject: "{{ report_subject_resolved }}"
           report_scope_label: "{{ report_scope_label }}"
           report_text_path: "{{ report_text_path }}"
           report_html_path: "{{ report_html_path }}"
@@ -149,5 +159,5 @@
         data:
           report_html_base64: "{{ report_html_slurp.content }}"
       when:
-        - report_emit_html_base64
+        - report_emit_html_base64_flag
         - report_html_slurp is defined
