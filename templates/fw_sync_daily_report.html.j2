@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Panorama Daily Sync Report</title>
+</head>
+<body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.4;">
+  <h2 style="margin-bottom: 4px;">Panorama Daily Sync Report</h2>
+  <p style="margin-top: 0;">
+    <strong>Date:</strong> {{ report_date }}<br>
+    <strong>Scope Type:</strong> {{ report_scope_label }}
+  </p>
+
+  <h3>Summary</h3>
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #d1d5db;">
+    <tr style="background-color: #f3f4f6;">
+      <th align="left">Metric</th>
+      <th align="left">Value</th>
+    </tr>
+    <tr>
+      <td>Devices In Sync</td>
+      <td>{{ devices_in_sync_count }}</td>
+    </tr>
+    <tr>
+      <td>Devices Out Of Sync</td>
+      <td>{{ devices_out_of_sync_count }}</td>
+    </tr>
+    <tr>
+      <td>Out-Of-Sync {{ report_scope_label }}</td>
+      <td>{{ scopes_out_of_sync | length }}</td>
+    </tr>
+  </table>
+
+  <h3>Admins By Change Count</h3>
+  {% if owner_counts | length == 0 %}
+  <p>None</p>
+  {% else %}
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #d1d5db;">
+    <tr style="background-color: #f3f4f6;">
+      <th align="left">Admin</th>
+      <th align="left">Changes</th>
+    </tr>
+    {% for item in (owner_counts | dict2items | sort(attribute='value', reverse=True)) %}
+    <tr>
+      <td>{{ item.key }}</td>
+      <td>{{ item.value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h3>Object Types By Change Count</h3>
+  {% if objtype_counts | length == 0 %}
+  <p>None</p>
+  {% else %}
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #d1d5db;">
+    <tr style="background-color: #f3f4f6;">
+      <th align="left">Object Type</th>
+      <th align="left">Changes</th>
+    </tr>
+    {% for item in (objtype_counts | dict2items | sort(attribute='value', reverse=True)) %}
+    <tr>
+      <td>{{ item.key }}</td>
+      <td>{{ item.value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h3>Out-Of-Sync {{ report_scope_label }} Details</h3>
+  {% if report_scope_rows | length == 0 %}
+  <p>None</p>
+  {% else %}
+  {% for row in report_scope_rows %}
+  <h4 style="margin-bottom: 6px;">{{ row.scope }} ({{ row.change_count }} changes)</h4>
+
+  <p style="margin-bottom: 4px;"><strong>Admins</strong></p>
+  {% if row.owner_counts | length == 0 %}
+  <p style="margin-top: 0;">None</p>
+  {% else %}
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #d1d5db; margin-bottom: 12px;">
+    <tr style="background-color: #f3f4f6;">
+      <th align="left">Admin</th>
+      <th align="left">Changes</th>
+    </tr>
+    {% for item in (row.owner_counts | dict2items | sort(attribute='value', reverse=True)) %}
+    <tr>
+      <td>{{ item.key }}</td>
+      <td>{{ item.value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <p style="margin-bottom: 4px;"><strong>Object Types</strong></p>
+  {% if row.objtype_counts | length == 0 %}
+  <p style="margin-top: 0;">None</p>
+  {% else %}
+  <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #d1d5db; margin-bottom: 16px;">
+    <tr style="background-color: #f3f4f6;">
+      <th align="left">Object Type</th>
+      <th align="left">Changes</th>
+    </tr>
+    {% for item in (row.objtype_counts | dict2items | sort(attribute='value', reverse=True)) %}
+    <tr>
+      <td>{{ item.key }}</td>
+      <td>{{ item.value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% endfor %}
+  {% endif %}
+</body>
+</html>
