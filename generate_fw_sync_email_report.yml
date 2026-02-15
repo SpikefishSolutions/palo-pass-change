@@ -110,12 +110,17 @@
       register: report_html_slurp
       when: report_emit_html_base64_flag or report_emit_html_debug_flag
 
+    - name: Normalize base64 payload for copy/decode
+      ansible.builtin.set_fact:
+        report_html_base64_clean: "{{ report_html_slurp.content | regex_replace('\\s+', '') }}"
+      when: report_html_slurp is defined
+
     - name: Debug rendered HTML report as base64
       ansible.builtin.debug:
-        msg: "{{ report_html_slurp.content }}"
+        msg: "{{ report_html_base64_clean }}"
       when:
         - report_emit_html_debug_flag
-        - report_html_slurp is defined
+        - report_html_base64_clean is defined
 
     - name: Send report email (HTML)
       ansible.builtin.mail:
@@ -151,7 +156,7 @@
     - name: Publish HTML base64 as stats
       ansible.builtin.set_stats:
         data:
-          report_html_base64: "{{ report_html_slurp.content }}"
+          report_html_base64: "{{ report_html_base64_clean }}"
       when:
         - report_emit_html_base64_flag
-        - report_html_slurp is defined
+        - report_html_base64_clean is defined
